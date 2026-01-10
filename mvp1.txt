@@ -1,0 +1,149 @@
+import React, { useEffect, useRef, useState } from "react";
+import * as BABYLON from "@babylonjs/core";
+import "@babylonjs/loaders";
+
+export default function TattooEditor() {
+  const canvasRef = useRef(null);
+  const tattooTextureRef = useRef(null);
+
+  const [tattooSize, setTattooSize] = useState(0.25);
+  const [tattooRotation, setTattooRotation] = useState(0);
+
+  useEffect(() => {
+    const engine = new BABYLON.Engine(canvasRef.current, true);
+    const scene = new BABYLON.Scene(engine);
+
+    /* ===== CAMERA ===== */
+    const camera = new BABYLON.ArcRotateCamera(
+      "cam",
+      Math.PI / 2,
+      Math.PI / 2.2,
+      4,
+      BABYLON.Vector3.Zero(),
+      scene
+    );
+    camera.attachControl(canvasRef.current, true);
+    camera.zoomToMouseLocation = true;
+
+    /* ===== ENVIRONMENT (FOR PBR MODELS) ===== */
+    scene.environmentTexture =
+      BABYLON.CubeTexture.CreateFromPrefilteredData(
+        "https://assets.babylonjs.com/environments/studio.env",
+        scene
+      );
+
+    /* ===== LIGHT ===== */
+    new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0, 1, 0), scene)
+      .intensity = 1;
+
+    /* ===== TATTOO TEXTURE ===== */
+    const tattooTex = new BABYLON.Texture("/tattoo.png", scene);
+    tattooTex.hasAlpha = true;
+    tattooTextureRef.current = tattooTex;
+
+    /* ===== LOAD MODEL ===== */
+    BABYLON.SceneLoader.Append("/models/", "rock.glb", scene, () => {
+      const meshes = scene.meshes.filter(m => m instanceof BABYLON.Mesh);
+      meshes.forEach(m => (m.isPickable = true));
+
+      const bounds = meshes[0].getHierarchyBoundingVectors(true);
+      const center = bounds.min.add(bounds.max).scale(0.5);
+      const size = bounds.max.subtract(bounds.min).length();
+
+      meshes.forEach(m => m.position.subtractInPlace(center));
+      camera.radius = size * 0.6;
+    });
+
+    /* ===== CLICK TO APPLY TATTOO ===== */
+    scene.onPointerObservable.add(info => {
+      if (info.type !== BABYLON.PointerEventTypes.POINTERDOWN) return;
+
+      const pick = scene.pick(scene.pointerX, scene.pointerY);
+      if (!pick?.hit || !pick.pickedMesh) return;
+
+      applyTattooDecal({
+        scene,
+        mesh: pick.pickedMesh,
+        position: pick.pickedPoint,
+        normal: pick.getNormal(true),
+        size: tattooSize,
+        rotation: tattooRotation,
+        texture: tattooTextureRef.current
+      });
+    });
+
+    engine.runRenderLoop(() => scene.render());
+    window.addEventListener("resize", () => engine.resize());
+
+    return () => engine.dispose();
+  }, [tattooSize, tattooRotation]);
+
+  return (
+    <>
+      <canvas ref={canvasRef} style={{ width: "100vw", height: "100vh" }} />
+
+      <div
+        style={{
+          position: "fixed",
+          right: 20,
+          top: 20,
+          background: "#111",
+          color: "#fff",
+          padding: 12,
+          borderRadius: 6
+        }}
+      >
+        <label>Size</label>
+        <input
+          type="range"
+          min="0.1"
+          max="0.5"
+          step="0.01"
+          value={tattooSize}
+          onChange={e => setTattooSize(+e.target.value)}
+        />
+
+        <label>Rotation</label>
+        <input
+          type="range"
+          min="0"
+          max="360"
+          value={tattooRotation}
+          onChange={e => setTattooRotation(+e.target.value)}
+        />
+      </div>
+    </>
+  );
+}
+
+/* ================= DECAL APPLICATION ================= */
+
+function applyTattooDecal({
+  scene,
+  mesh,
+  position,
+  normal,
+  size,
+  rotation,
+  texture
+}) {
+  const decal = BABYLON.MeshBuilder.CreateDecal(
+    "tattooDecal",
+    mesh,
+    {
+      position,
+      normal,
+      size: new BABYLON.Vector3(size, size, size)
+    },
+    scene
+  );
+
+  const mat = new BABYLON.StandardMaterial("tattooMat", scene);
+  mat.diffuseTexture = texture;
+  mat.diffuseTexture.hasAlpha = true;
+  mat.zOffset = -2;
+  mat.backFaceCulling = false;
+
+  decal.material = mat;
+  decal.rotation.z = BABYLON.Tools.ToRadians(rotation);
+}

@@ -1,0 +1,220 @@
+import React, { useEffect, useRef, useState } from "react";
+import * as BABYLON from "@babylonjs/core";
+import "@babylonjs/loaders";
+
+export default function TattooEditor() {
+  const canvasRef = useRef(null);
+  const engineRef = useRef(null);
+  const sceneRef = useRef(null);
+
+  const activeTattooRef = useRef(null);
+  const tattooSizeRef = useRef(0.25);
+  const tattoosRef = useRef([]);
+
+  const [tattoos, setTattoos] = useState([]);
+  const [activeTattoo, setActiveTattoo] = useState(null);
+  const [tattooSize, setTattooSize] = useState(0.25);
+
+  /* ================= INIT BABYLON ================= */
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const engine = new BABYLON.Engine(canvas, true);
+    engineRef.current = engine;
+
+    const scene = new BABYLON.Scene(engine);
+    scene.clearColor = new BABYLON.Color4(0, 0, 0, 0);
+    sceneRef.current = scene;
+
+    /* ===== CAMERA ===== */
+    const camera = new BABYLON.ArcRotateCamera(
+      "cam",
+      Math.PI / 2,
+      Math.PI / 2.2,
+      4,
+      BABYLON.Vector3.Zero(),
+      scene
+    );
+    camera.attachControl(canvas, true);
+    camera.angularSensibilityX = 250;
+    camera.angularSensibilityY = 250;
+
+    /* ===== LIGHT ===== */
+    new BABYLON.HemisphericLight(
+      "light",
+      new BABYLON.Vector3(0, 1, 0),
+      scene
+    ).intensity = 1;
+
+    /* ===== LOAD MODEL ===== */
+    BABYLON.SceneLoader.Append("/models/", "3men.glb", scene, () => {
+      const meshes = scene.meshes.filter(m => m instanceof BABYLON.Mesh);
+      meshes.forEach(mesh => {
+        mesh.isPickable = true;
+        mesh.material = createTattooMaterial(scene);
+      });
+    });
+
+    /* ===== CLICK TO PLACE TATTOO ===== */
+    scene.onPointerDown = () => {
+      if (!activeTattooRef.current) return;
+
+      const pick = scene.pick(scene.pointerX, scene.pointerY);
+      if (!pick?.hit) return;
+
+      tattoosRef.current.push({
+        position: pick.pickedPoint.clone(),
+        size: tattooSizeRef.current,
+        texture: new BABYLON.Texture(activeTattooRef.current, scene)
+      });
+
+      updateShader(scene);
+    };
+
+    engine.runRenderLoop(() => scene.render());
+    window.addEventListener("resize", () => engine.resize());
+
+    return () => engine.dispose();
+  }, []);
+
+  /* ================= STATE → REF ================= */
+
+  useEffect(() => {
+    activeTattooRef.current = activeTattoo;
+  }, [activeTattoo]);
+
+  useEffect(() => {
+    tattooSizeRef.current = tattooSize;
+  }, [tattooSize]);
+
+  /* ================= REMOVE LAST ================= */
+
+  function removeLastTattoo() {
+    tattoosRef.current.pop();
+    updateShader(sceneRef.current);
+  }
+
+  /* ================= UPLOAD ================= */
+
+  function handleUpload(e) {
+    for (const file of e.target.files) {
+      setTattoos(prev => [...prev, URL.createObjectURL(file)]);
+    }
+  }
+
+  return (
+    <div className="container">
+      <div className="sidebar">
+        <input type="file" multiple onChange={handleUpload} />
+
+        {activeTattoo && (
+          <input
+            type="range"
+            min="0.05"
+            max="0.6"
+            step="0.01"
+            value={tattooSize}
+            onChange={e => setTattooSize(+e.target.value)}
+          />
+        )}
+
+        <button onClick={removeLastTattoo}>Remove Last Tattoo</button>
+
+        {tattoos.map((t, i) => (
+          <img
+            key={i}
+            src={t}
+            className={activeTattoo === t ? "active" : ""}
+            onClick={() => setActiveTattoo(t)}
+          />
+        ))}
+      </div>
+
+      <canvas ref={canvasRef} className="renderCanvas" />
+    </div>
+  );
+}
+
+/* ================= SHADER ================= */
+
+function createTattooMaterial(scene) {
+  BABYLON.Effect.ShadersStore["tattooVertexShader"] = `
+    precision highp float;
+    attribute vec3 position;
+    uniform mat4 worldViewProjection;
+    varying vec3 vWorldPos;
+
+    void main() {
+      vec4 worldPos = worldViewProjection * vec4(position, 1.0);
+      vWorldPos = position;
+      gl_Position = worldPos;
+    }
+  `;
+
+  BABYLON.Effect.ShadersStore["tattooFragmentShader"] = `
+    precision highp float;
+    varying vec3 vWorldPos;
+
+    uniform sampler2D tattooTex[8];
+    uniform vec3 tattooPos[8];
+    uniform float tattooSize[8];
+    uniform int tattooCount;
+
+    void main() {
+      vec4 color = vec4(1.0);
+
+      for (int i = 0; i < 8; i++) {
+        if (i >= tattooCount) break;
+
+        vec3 p = vWorldPos - tattooPos[i];
+        float d = length(p.xy);
+
+        if (d < tattooSize[i]) {
+          vec2 uv = p.xy / tattooSize[i] * 0.5 + 0.5;
+          vec4 t = texture2D(tattooTex[i], uv);
+          color = mix(color, t, t.a);
+        }
+      }
+
+      gl_FragColor = color;
+    }
+  `;
+
+  const mat = new BABYLON.ShaderMaterial(
+    "tattooMat",
+    scene,
+    {
+      vertex: "tattoo",
+      fragment: "tattoo"
+    },
+    {
+      attributes: ["position"],
+      uniforms: [
+        "worldViewProjection",
+        "tattooPos",
+        "tattooSize",
+        "tattooCount"
+      ],
+      samplers: ["tattooTex"]
+    }
+  );
+
+  return mat;
+}
+
+function updateShader(scene) {
+  if (!scene) return;
+
+  scene.meshes.forEach(mesh => {
+    const mat = mesh.material;
+    if (!(mat instanceof BABYLON.ShaderMaterial)) return;
+
+    mat.setInt("tattooCount", tattoosRef.current.length);
+
+    tattoosRef.current.forEach((t, i) => {
+      mat.setVector3(`tattooPos[${i}]`, t.position);
+      mat.setFloat(`tattooSize[${i}]`, t.size);
+      mat.setTexture(`tattooTex[${i}]`, t.texture);
+    });
+  });
+}
