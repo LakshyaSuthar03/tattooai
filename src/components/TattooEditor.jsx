@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import * as BABYLON from "@babylonjs/core";
 import "@babylonjs/loaders";
 
-export default function TattooEditor() {
+export default function TattooEditor({ modelUrl }) {
   const canvasRef = useRef(null);
   const containerRef = useRef(null);
 
@@ -11,21 +11,24 @@ export default function TattooEditor() {
   const cameraRef = useRef(null);
 
   const activeTattooRef = useRef(null);
-  const tattooSizeRef = useRef(0.25);
-  const tattooRotationRef = useRef(0); // radians (NEGATIVE for Babylon)
-  const appliedDecalsRef = useRef([]);
+  const sizeRef = useRef(0.25);
+  const rotationRef = useRef(0);
+  const decalsRef = useRef([]);
 
   const [tattoos, setTattoos] = useState([]);
   const [activeTattoo, setActiveTattoo] = useState(null);
-  const [tattooSize, setTattooSize] = useState(0.25);
-  const [tattooRotation, setTattooRotation] = useState(0); // degrees (UI)
+  const [size, setSize] = useState(0.25);
+  const [rotation, setRotation] = useState(0);
 
   /* ================= INIT BABYLON ================= */
 
   useEffect(() => {
+    if (!modelUrl) return;
+
     const canvas = canvasRef.current;
     const container = containerRef.current;
 
+    /* 🔒 PREVENT BROWSER ZOOM */
     const preventZoom = e => {
       if (e.ctrlKey || e.metaKey) e.preventDefault();
     };
@@ -35,7 +38,6 @@ export default function TattooEditor() {
     engineRef.current = engine;
 
     const scene = new BABYLON.Scene(engine);
-    scene.clearColor = new BABYLON.Color4(0, 0, 0, 0);
     sceneRef.current = scene;
 
     /* ===== CAMERA ===== */
@@ -48,12 +50,8 @@ export default function TattooEditor() {
       scene
     );
     camera.attachControl(canvas, true);
-    camera.angularSensibilityX = 250;
-    camera.angularSensibilityY = 250;
     camera.zoomToMouseLocation = true;
-    camera.useNaturalPinchZoom = true;
     camera.wheelDeltaPercentage = 0.015;
-    camera.wheelPrecision = 0;
     cameraRef.current = camera;
 
     /* ===== LIGHT ===== */
@@ -63,15 +61,8 @@ export default function TattooEditor() {
       scene
     ).intensity = 1;
 
-    /* ===== ENV ===== */
-    scene.environmentTexture =
-      BABYLON.CubeTexture.CreateFromPrefilteredData(
-        "https://assets.babylonjs.com/environments/studio.env",
-        scene
-      );
-
     /* ===== LOAD MODEL ===== */
-    BABYLON.SceneLoader.Append("/models/", "jhon.glb", scene, () => {
+    BABYLON.SceneLoader.Append("", modelUrl, scene, () => {
       const meshes = scene.meshes.filter(m => m instanceof BABYLON.Mesh);
       meshes.forEach(m => (m.isPickable = true));
 
@@ -84,7 +75,7 @@ export default function TattooEditor() {
       camera.radius = size * 0.6;
     });
 
-    /* ===== POINTER MOVE (PREVIEW) ===== */
+    /* ===== PREVIEW ON HOVER ===== */
     scene.onPointerMove = () => {
       if (!activeTattooRef.current) {
         disposePreview();
@@ -100,13 +91,13 @@ export default function TattooEditor() {
       showPreviewDecal(
         pick,
         activeTattooRef.current,
-        tattooSizeRef.current,
-        tattooRotationRef.current,
+        sizeRef.current,
+        rotationRef.current,
         scene
       );
     };
 
-    /* ===== APPLY ===== */
+    /* ===== APPLY ON CLICK ===== */
     scene.onPointerDown = () => {
       if (!activeTattooRef.current) return;
 
@@ -118,12 +109,12 @@ export default function TattooEditor() {
       const decal = applyTattooDecal(
         pick,
         activeTattooRef.current,
-        tattooSizeRef.current,
-        tattooRotationRef.current,
+        sizeRef.current,
+        rotationRef.current,
         scene
       );
 
-      appliedDecalsRef.current.push(decal);
+      decalsRef.current.push(decal);
     };
 
     engine.runRenderLoop(() => scene.render());
@@ -133,7 +124,7 @@ export default function TattooEditor() {
       engine.dispose();
       container.removeEventListener("wheel", preventZoom);
     };
-  }, []);
+  }, [modelUrl]);
 
   /* ================= STATE → REF ================= */
 
@@ -142,27 +133,26 @@ export default function TattooEditor() {
   }, [activeTattoo]);
 
   useEffect(() => {
-    tattooSizeRef.current = tattooSize;
-  }, [tattooSize]);
+    sizeRef.current = size;
+  }, [size]);
 
   useEffect(() => {
-    // IMPORTANT: negative sign to match CSS rotation
-    tattooRotationRef.current = -BABYLON.Tools.ToRadians(tattooRotation);
-  }, [tattooRotation]);
+    rotationRef.current = -BABYLON.Tools.ToRadians(rotation);
+  }, [rotation]);
 
   /* ================= UI ================= */
 
-  function removeLastTattoo() {
-    const list = appliedDecalsRef.current;
-    if (!list.length) return;
-    list.pop().dispose();
-  }
-
-  function handleUpload(e) {
+  function uploadTattoo(e) {
     Array.from(e.target.files).forEach(file => {
       const url = URL.createObjectURL(file);
-      setTattoos(prev => [...prev, { url }]);
+      setTattoos(prev => [...prev, url]);
     });
+  }
+
+  function removeLastTattoo() {
+    const list = decalsRef.current;
+    if (!list.length) return;
+    list.pop().dispose();
   }
 
   return (
@@ -171,22 +161,18 @@ export default function TattooEditor() {
         <h3>Tattoos</h3>
 
         {activeTattoo && (
-          <>
-            <div className="previewLabel">Selected Tattoo</div>
-
-            <div className="previewBox">
-              <img
-                src={activeTattoo}
-                alt="preview"
-                style={{
-                  transform: `rotate(${tattooRotation}deg) scale(${tattooSize * 2})`
-                }}
-              />
-            </div>
-          </>
+          <div className="previewBox">
+            <img
+              src={activeTattoo}
+              alt="preview"
+              style={{
+                transform: `rotate(${rotation}deg) scale(${size * 2})`
+              }}
+            />
+          </div>
         )}
 
-        <input type="file" accept="image/*" multiple onChange={handleUpload} />
+        <input type="file" accept="image/*" multiple onChange={uploadTattoo} />
 
         {activeTattoo && (
           <>
@@ -196,8 +182,8 @@ export default function TattooEditor() {
               min="0.05"
               max="0.6"
               step="0.01"
-              value={tattooSize}
-              onChange={e => setTattooSize(+e.target.value)}
+              value={size}
+              onChange={e => setSize(+e.target.value)}
             />
 
             <label>Rotation</label>
@@ -205,9 +191,8 @@ export default function TattooEditor() {
               type="range"
               min="0"
               max="360"
-              step="1"
-              value={tattooRotation}
-              onChange={e => setTattooRotation(+e.target.value)}
+              value={rotation}
+              onChange={e => setRotation(+e.target.value)}
             />
           </>
         )}
@@ -218,9 +203,9 @@ export default function TattooEditor() {
           {tattoos.map((t, i) => (
             <img
               key={i}
-              src={t.url}
-              className={`tattooImg ${activeTattoo === t.url ? "active" : ""}`}
-              onClick={() => setActiveTattoo(t.url)}
+              src={t}
+              className={activeTattoo === t ? "active" : ""}
+              onClick={() => setActiveTattoo(t)}
             />
           ))}
         </div>
@@ -283,5 +268,5 @@ function applyTattooDecal(pick, imageUrl, size, rotation, scene) {
   mat.zOffset = -2;
 
   decal.material = mat;
-  return decal; 
+  return decal;
 }

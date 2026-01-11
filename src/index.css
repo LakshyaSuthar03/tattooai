@@ -1,124 +1,29 @@
-html,
-body,
-#root {
+html, body, #root {
   margin: 0;
-  padding: 0;
-  width: 100%;
   height: 100%;
-  overflow: hidden;
+  overflow: hidden; /* prevents browser scroll/zoom issues */
 }
 
-/* ===== MAIN LAYOUT ===== */
 .container {
-  display: flex;
-  width: 100vw;
-  height: 100vh;
-  position: relative;
-}
-
-/* ===== SIDEBAR ===== */
-.sidebar {
   position: absolute;
-  left: 0;
-  width: 260px; /* fixed editor width */
-  min-width: 260px;
-  max-width: 260px;
-  background: #111;
-  color: #fff;
-  padding: 16px;
-  box-sizing: border-box;
-  margin-left: 200px;
+  inset: 0;
   display: flex;
-  flex-direction: column;
-  gap: 12px;
+}
 
+/* 20% dashboard */
+.sidebar {
+  width: 20%;
+  min-width: 240px;
+  max-width: 320px;
+  background: #111;
+  color: white;
+  padding: 12px;
   overflow-y: auto;
-  border-right: 1px solid #222;
 }
 
-/* Sidebar title */
-.sidebar h3 {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 600;
-}
-
-/* Upload input */
-.sidebar input[type="file"] {
-  font-size: 12px;
-  color: #ccc;
-}
-
-/* ===== TATTOO GRID ===== */
-.tattooGrid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
-  gap: 10px;
-}
-
-/* Tattoo thumbnail */
-.tattooImg {
-  width: 100%;
-  aspect-ratio: 1 / 1;
-  object-fit: contain;
-  background: #1a1a1a;
-  padding: 6px;
-  box-sizing: border-box;
-
-  cursor: pointer;
-  border-radius: 6px;
-  border: 1px solid #333;
-
-  transition: transform 0.15s ease, border 0.15s ease;
-}
-
-.tattooImg:hover {
-  transform: scale(1.05);
-  border-color: #666;
-}
-
-/* Active tattoo */
-.tattooImg.active {
-  border: 2px solid #00ff88;
-}
-
-/* ===== CANVAS ===== */
+/* 80% model area */
 .renderCanvas {
-  flex: 1;
-  width: 100%;
+  width: 80%;
   height: 100%;
   display: block;
-  outline: none;
-}
-
-.selectedTattooPreview {
-  margin-top: 15px;
-  padding: 10px;
-  background: #1a1a1a;
-  border-radius: 8px;
-}
-
-.previewLabel {
-  font-size: 12px;
-  opacity: 0.8;
-  margin-bottom: 6px;
-}
-
-.previewBox {
-  width: 140px;
-  height: 140px;
-  background: #222;
-  border: 1px dashed #444;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-bottom: 10px;
-  overflow: hidden;
-}
-
-.previewBox img {
-  max-width: 80%;
-  max-height: 80%;
-  transition: transform 0.1s linear;
-  pointer-events: none;
 }
