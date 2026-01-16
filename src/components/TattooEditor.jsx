@@ -2,34 +2,52 @@ import React, { useEffect, useRef, useState } from "react";
 import * as BABYLON from "@babylonjs/core";
 import "@babylonjs/loaders";
 
-export default function TattooEditor({ modelUrl }) {
+export default function TattooEditor() {
   const canvasRef = useRef(null);
   const containerRef = useRef(null);
 
   const engineRef = useRef(null);
   const sceneRef = useRef(null);
   const cameraRef = useRef(null);
+  const modelRootRef = useRef(null);
 
   const activeTattooRef = useRef(null);
   const sizeRef = useRef(0.25);
   const rotationRef = useRef(0);
   const decalsRef = useRef([]);
 
+  const [models, setModels] = useState([]);
+  const [activeModel, setActiveModel] = useState(null);
+
   const [tattoos, setTattoos] = useState([]);
   const [activeTattoo, setActiveTattoo] = useState(null);
   const [size, setSize] = useState(0.25);
   const [rotation, setRotation] = useState(0);
 
+  const [loading, setLoading] = useState(false);
+  const [modelUrl, setModelUrl] = useState("");
+
+  const backendUrl =
+    import.meta.env.VITE_BACKEND_URL || "http://localhost:5000";
+
+  /* ================= FETCH MODELS ================= */
+
+  useEffect(() => {
+    async function loadModels() {
+      const res = await fetch(`${backendUrl}/api/list-models`);
+      const data = await res.json();
+      setModels(data.models);
+    }
+    loadModels();
+  }, [loading]);
+
   /* ================= INIT BABYLON ================= */
 
   useEffect(() => {
-    if (!modelUrl) return;
-
     const canvas = canvasRef.current;
     const container = containerRef.current;
 
-    /* 🔒 PREVENT BROWSER ZOOM */
-    const preventZoom = e => {
+    const preventZoom = (e) => {
       if (e.ctrlKey || e.metaKey) e.preventDefault();
     };
     container.addEventListener("wheel", preventZoom, { passive: false });
@@ -40,9 +58,8 @@ export default function TattooEditor({ modelUrl }) {
     const scene = new BABYLON.Scene(engine);
     sceneRef.current = scene;
 
-    /* ===== CAMERA ===== */
     const camera = new BABYLON.ArcRotateCamera(
-      "cam",
+      "camera",
       Math.PI / 2,
       Math.PI / 2.2,
       4,
@@ -54,35 +71,62 @@ export default function TattooEditor({ modelUrl }) {
     camera.wheelDeltaPercentage = 0.015;
     cameraRef.current = camera;
 
-    /* ===== LIGHT ===== */
     new BABYLON.HemisphericLight(
-      "hemi",
+      "light",
       new BABYLON.Vector3(0, 1, 0),
       scene
-    ).intensity = 1;
+    ).intensity = 1.2;
 
-    /* ===== LOAD MODEL ===== */
-    BABYLON.SceneLoader.Append("", modelUrl, scene, () => {
-      const meshes = scene.meshes.filter(m => m instanceof BABYLON.Mesh);
-      meshes.forEach(m => (m.isPickable = true));
+    let pointerDown = false;
 
-      const bounds = meshes[0].getHierarchyBoundingVectors(true);
-      const center = bounds.min.add(bounds.max).scale(0.5);
-      const size = bounds.max.subtract(bounds.min).length();
+    scene.onPointerDown = () => {
+      pointerDown = true;
 
-      meshes.forEach(m => m.position.subtractInPlace(center));
-      camera.setTarget(BABYLON.Vector3.Zero());
-      camera.radius = size * 0.6;
-    });
+      if (!activeTattooRef.current) return;
 
-    /* ===== PREVIEW ON HOVER ===== */
+      const pick = scene.pick(
+        scene.pointerX,
+        scene.pointerY,
+        (mesh) => mesh.metadata?.isModel
+      );
+
+      if (!pick?.hit || !pick.pickedMesh) return;
+
+      disposePreview();
+
+      const decal = applyTattooDecal(
+        pick,
+        activeTattooRef.current,
+        sizeRef.current,
+        rotationRef.current,
+        scene
+      );
+
+      decal.isPickable = false;
+      decalsRef.current.push(decal);
+    };
+
+    scene.onPointerUp = () => {
+      pointerDown = false;
+    };
+
     scene.onPointerMove = () => {
+      if (pointerDown) {
+        disposePreview();
+        return;
+      }
+
       if (!activeTattooRef.current) {
         disposePreview();
         return;
       }
 
-      const pick = scene.pick(scene.pointerX, scene.pointerY);
+      const pick = scene.pick(
+        scene.pointerX,
+        scene.pointerY,
+        (mesh) => mesh.metadata?.isModel
+      );
+
       if (!pick?.hit || !pick.pickedMesh) {
         disposePreview();
         return;
@@ -97,34 +141,52 @@ export default function TattooEditor({ modelUrl }) {
       );
     };
 
-    /* ===== APPLY ON CLICK ===== */
-    scene.onPointerDown = () => {
-      if (!activeTattooRef.current) return;
-
-      const pick = scene.pick(scene.pointerX, scene.pointerY);
-      if (!pick?.hit || !pick.pickedMesh) return;
-
-      disposePreview();
-
-      const decal = applyTattooDecal(
-        pick,
-        activeTattooRef.current,
-        sizeRef.current,
-        rotationRef.current,
-        scene
-      );
-
-      decalsRef.current.push(decal);
-    };
-
     engine.runRenderLoop(() => scene.render());
-    window.addEventListener("resize", () => engine.resize());
+
+    const resize = () => engine.resize();
+    window.addEventListener("resize", resize);
 
     return () => {
+      window.removeEventListener("resize", resize);
+      engine.stopRenderLoop();
       engine.dispose();
       container.removeEventListener("wheel", preventZoom);
     };
-  }, [modelUrl]);
+  }, []);
+
+  /* ================= LOAD MODEL ================= */
+
+  useEffect(() => {
+    if (!activeModel || !sceneRef.current) return;
+
+    const scene = sceneRef.current;
+
+    if (modelRootRef.current) {
+      modelRootRef.current.dispose();
+      decalsRef.current.forEach((d) => d.dispose());
+      decalsRef.current = [];
+    }
+
+    BABYLON.SceneLoader.ImportMesh("", "", activeModel.url, scene, (meshes) => {
+      const root = new BABYLON.TransformNode("modelRoot", scene);
+
+      meshes.forEach((m) => {
+        m.isPickable = true;
+        m.metadata = { isModel: true };
+        m.parent = root;
+      });
+
+      modelRootRef.current = root;
+
+      const bounds = root.getHierarchyBoundingVectors(true);
+      const center = bounds.min.add(bounds.max).scale(0.5);
+      const size = bounds.max.subtract(bounds.min).length();
+
+      root.position.subtractInPlace(center);
+      cameraRef.current.setTarget(BABYLON.Vector3.Zero());
+      cameraRef.current.radius = size * 0.6;
+    });
+  }, [activeModel]);
 
   /* ================= STATE → REF ================= */
 
@@ -143,35 +205,64 @@ export default function TattooEditor({ modelUrl }) {
   /* ================= UI ================= */
 
   function uploadTattoo(e) {
-    Array.from(e.target.files).forEach(file => {
+    Array.from(e.target.files).forEach((file) => {
       const url = URL.createObjectURL(file);
-      setTattoos(prev => [...prev, url]);
+      setTattoos((prev) => [...prev, url]);
     });
   }
 
-  function removeLastTattoo() {
-    const list = decalsRef.current;
-    if (!list.length) return;
-    list.pop().dispose();
+  useEffect(() => {
+    if (modelUrl) {
+      setActiveModel({ name: "Custom Model", url: modelUrl });
+    }
+  }, [modelUrl]);
+
+  async function handleImageUpload(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    setLoading(true);
+    setModelUrl("");
+
+    try {
+      const formData = new FormData();
+      formData.append("image", file);
+
+      const res = await fetch(`${backendUrl}/api/image-to-3d`, {
+        method: "POST",
+        body: formData,
+      });
+
+      const data = await res.json();
+      setModelUrl(`${backendUrl}/models/${data.model}`);
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
     <div className="container" ref={containerRef}>
       <div className="sidebar">
-        <h3>Tattoos</h3>
-
-        {activeTattoo && (
-          <div className="previewBox">
-            <img
-              src={activeTattoo}
-              alt="preview"
-              style={{
-                transform: `rotate(${rotation}deg) scale(${size * 2})`
-              }}
-            />
+        <h3>Models</h3>
+        {models.map((m) => (
+          <div
+            key={m.url}
+            className={`modelItem ${
+              activeModel?.url === m.url ? "active" : ""
+            }`}
+            onClick={() => setActiveModel(m)}
+          >
+            {m.name}
           </div>
-        )}
+        ))}
 
+        <h3>Generate 3D model</h3>
+        <input type="file" accept="image/*" onChange={handleImageUpload} />
+        {loading && <p>Generating 3D model...</p>}
+
+        <h3>Tattoos</h3>
         <input type="file" accept="image/*" multiple onChange={uploadTattoo} />
 
         {activeTattoo && (
@@ -183,7 +274,7 @@ export default function TattooEditor({ modelUrl }) {
               max="0.6"
               step="0.01"
               value={size}
-              onChange={e => setSize(+e.target.value)}
+              onChange={(e) => setSize(+e.target.value)}
             />
 
             <label>Rotation</label>
@@ -192,12 +283,10 @@ export default function TattooEditor({ modelUrl }) {
               min="0"
               max="360"
               value={rotation}
-              onChange={e => setRotation(+e.target.value)}
+              onChange={(e) => setRotation(+e.target.value)}
             />
           </>
         )}
-
-        <button onClick={removeLastTattoo}>Remove Last Tattoo</button>
 
         <div className="tattooGrid">
           {tattoos.map((t, i) => (
@@ -228,45 +317,49 @@ function disposePreview() {
 function showPreviewDecal(pick, imageUrl, size, rotation, scene) {
   disposePreview();
 
-  const texture = new BABYLON.Texture(imageUrl, scene);
-  const aspect = texture.getSize().width / texture.getSize().height;
+  const tex = new BABYLON.Texture(imageUrl, scene);
+  const aspect = tex.getSize().width / tex.getSize().height;
 
   const decal = BABYLON.MeshBuilder.CreateDecal("preview", pick.pickedMesh, {
     position: pick.pickedPoint,
     normal: pick.getNormal(true),
     size: new BABYLON.Vector3(size * aspect, size, size * 0.5),
-    angle: rotation
+    angle: rotation,
   });
 
   const mat = new BABYLON.StandardMaterial("previewMat", scene);
-  mat.diffuseTexture = texture;
+  mat.diffuseTexture = tex;
   mat.diffuseTexture.hasAlpha = true;
   mat.alpha = 0.5;
   mat.backFaceCulling = false;
-  mat.zOffset = -3;
 
   decal.material = mat;
+  decal.isPickable = false;
+
   window._previewDecal = decal;
 }
 
 function applyTattooDecal(pick, imageUrl, size, rotation, scene) {
-  const texture = new BABYLON.Texture(imageUrl, scene);
-  const aspect = texture.getSize().width / texture.getSize().height;
+  const tex = new BABYLON.Texture(imageUrl, scene);
+  const aspect = tex.getSize().width / tex.getSize().height;
 
   const decal = BABYLON.MeshBuilder.CreateDecal("tattoo", pick.pickedMesh, {
     position: pick.pickedPoint,
     normal: pick.getNormal(true),
     size: new BABYLON.Vector3(size * aspect, size, size * 0.5),
-    angle: rotation
+    angle: rotation,
   });
 
-  const mat = new BABYLON.StandardMaterial("tattooMat", scene);
-  mat.diffuseTexture = texture;
-  mat.diffuseTexture.hasAlpha = true;
-  mat.useAlphaFromDiffuseTexture = true;
-  mat.backFaceCulling = false;
+  const mat = new BABYLON.PBRMaterial("tattooMat", scene);
+  mat.albedoTexture = tex;
+  mat.albedoTexture.hasAlpha = true;
+  mat.metallic = 0.0;
+  mat.roughness = 0.9;
   mat.zOffset = -2;
+  mat.backFaceCulling = false;
 
   decal.material = mat;
+  decal.isPickable = false;
+
   return decal;
 }

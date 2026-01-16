@@ -1,7 +1,8 @@
 html, body, #root {
   margin: 0;
   height: 100%;
-  overflow: hidden; /* prevents browser scroll/zoom issues */
+  overflow: hidden;
+  font-family: system-ui, sans-serif;
 }
 
 .container {
@@ -10,7 +11,7 @@ html, body, #root {
   display: flex;
 }
 
-/* 20% dashboard */
+/* Sidebar */
 .sidebar {
   width: 20%;
   min-width: 240px;
@@ -19,11 +20,69 @@ html, body, #root {
   color: white;
   padding: 12px;
   overflow-y: auto;
+  box-sizing: border-box;
 }
 
-/* 80% model area */
+.sidebar h3 {
+  margin: 12px 0 6px;
+  font-size: 14px;
+  text-transform: uppercase;
+  color: #aaa;
+}
+
+/* Model list */
+.modelItem {
+  padding: 6px 8px;
+  cursor: pointer;
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+.modelItem:hover {
+  background: #222;
+}
+
+.modelItem.active {
+  background: #444;
+}
+
+/* Sliders */
+.sidebar label {
+  display: block;
+  font-size: 12px;
+  margin-top: 10px;
+  margin-bottom: 4px;
+}
+
+.sidebar input[type="range"] {
+  width: 100%;
+}
+
+/* Tattoo grid */
+.tattooGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.tattooGrid img {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: contain;
+  border-radius: 4px;
+  cursor: pointer;
+  background: #222;
+  padding: 4px;
+}
+
+.tattooGrid img.active {
+  outline: 2px solid #4caf50;
+}
+
+/* Canvas */
 .renderCanvas {
-  width: 80%;
+  flex: 1;
   height: 100%;
   display: block;
 }
